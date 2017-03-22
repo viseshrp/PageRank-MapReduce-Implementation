@@ -156,7 +156,10 @@ public class PageRank extends Configured implements Tool {
 		private Text word = new Text();
 
 		public void map(LongWritable offset, Text lineText, Context context) throws IOException, InterruptedException {
-			context.write(word, one);
+			String line = lineText.toString();
+
+			if (!line.isEmpty())
+				context.write(word, one);
 		}
 	}
 
@@ -204,7 +207,7 @@ public class PageRank extends Configured implements Tool {
 			}
 
 			// get outlinks
-			Pattern pattern = Pattern.compile("<text xml:space=\"preserve\">(.*?)</text>");
+			Pattern pattern = Pattern.compile("<text(.*?)</text>");
 			java.util.regex.Matcher matcher = pattern.matcher(line);
 			String prAndOutlinkList = Double.toString(PRinit) + ",,,,,";
 			while (matcher.find()) {

@@ -44,26 +44,26 @@ public class PageRank extends Configured implements Tool {
 
 		Configuration conf1 = new Configuration();
 
-		String intermediate_dir = "intermediate_dir";
-		Path output_path = new Path(args[1]);
-		Path intermediate_path = new Path(intermediate_dir);
+		String intermediate_directory = "intermediate_dir";
+		Path output_directory = new Path(args[1]);
+		Path intermediate_path = new Path(intermediate_directory);
 
-		FileSystem hdfs = FileSystem.get(conf1);
+		FileSystem filesystem = FileSystem.get(conf1);
 
 		try {
-			if (hdfs.exists(output_path)) {
-				hdfs.delete(output_path, true);
+			if (filesystem.exists(output_directory)) {
+				filesystem.delete(output_directory, true);
 			}
-			if (hdfs.exists(intermediate_path)) {
-				hdfs.delete(intermediate_path, true);
+			if (filesystem.exists(intermediate_path)) {
+				filesystem.delete(intermediate_path, true);
 			}
-			hdfs.mkdirs(intermediate_path);
+			filesystem.mkdirs(intermediate_path);
 
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 
-		Path links_count = new Path(intermediate_path, "links_count");
+		Path page_count = new Path(intermediate_path, "page_count");
 
 		Job pageCountjob = Job.getInstance(conf1, " pageCountjob ");
 
@@ -72,7 +72,7 @@ public class PageRank extends Configured implements Tool {
 		pageCountjob.setReducerClass(ReducePageCount.class);
 
 		FileInputFormat.addInputPaths(pageCountjob, args[0]);
-		FileOutputFormat.setOutputPath(pageCountjob, links_count);
+		FileOutputFormat.setOutputPath(pageCountjob, page_count);
 
 		// Explicitly set key and value types of map and reduce output
 		pageCountjob.setOutputKeyClass(Text.class);
@@ -83,7 +83,7 @@ public class PageRank extends Configured implements Tool {
 		System.out.println("=====PAGE COUNT COMPLETE=====");
 		// PHASE-1
 		if (success == 0) {
-			
+
 			System.out.println("=====BEGIN GENERATION OF LINK GRAPH=====");
 
 			Job linkGraphJob = Job.getInstance(getConf(), "linkGraphJob");
@@ -96,18 +96,18 @@ public class PageRank extends Configured implements Tool {
 			int numOfLines = 1;
 
 			try {
-			FileSystem fs2 = FileSystem.get(conf2);
-			Path p = new Path(links_count, "part-r-00000");
+				FileSystem fs2 = FileSystem.get(conf2);
+				Path p = new Path(page_count, "part-r-00000");
 
-			BufferedReader br = new BufferedReader(new InputStreamReader(fs2.open(p)));
-			while ((line = br.readLine()) != null) {
-				if (line.trim().length() > 0) {
-					System.out.println(line);
-					String[] parts = line.split("\\s+");
-					numOfLines = Integer.parseInt(parts[1]);
+				BufferedReader br = new BufferedReader(new InputStreamReader(fs2.open(p)));
+				while ((line = br.readLine()) != null) {
+					if (line.trim().length() > 0) {
+						System.out.println(line);
+						String[] parts = line.split("\\s+");
+						numOfLines = Integer.parseInt(parts[1]);
+					}
 				}
-			}
-			br.close();
+				br.close();
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
@@ -141,7 +141,7 @@ public class PageRank extends Configured implements Tool {
 
 				for (int i = 1; i < 11; i++) {
 
-					System.out.println("=========================Iteration" + i + "=========================");
+					System.out.println("=========================Iteration number " + i + "=========================");
 					Job pageRankComputeJob = Job.getInstance(getConf(), "pageRankComputeJob");
 
 					// Configuration conf3 =
@@ -153,7 +153,7 @@ public class PageRank extends Configured implements Tool {
 
 					pageRankComputeJob.setReducerClass(ReducePageRankCompute.class);
 
-					Path intermediate_file_path = new Path(intermediate_path, "iteration" + i);
+					Path intermediate_file_path = new Path(intermediate_path, "iter" + i);
 
 					FileInputFormat.addInputPath(pageRankComputeJob, link_graph);
 					FileOutputFormat.setOutputPath(pageRankComputeJob, intermediate_file_path);
@@ -222,7 +222,7 @@ public class PageRank extends Configured implements Tool {
 				pageRankSortJob.setReducerClass(ReducePageRankSort.class);
 
 				FileInputFormat.addInputPath(pageRankSortJob, link_graph);
-				FileOutputFormat.setOutputPath(pageRankSortJob, output_path);
+				FileOutputFormat.setOutputPath(pageRankSortJob, output_directory);
 				pageRankSortJob.setNumReduceTasks(1);
 
 				pageRankSortJob.setInputFormatClass(KeyValueTextInputFormat.class);
@@ -325,14 +325,20 @@ public class PageRank extends Configured implements Tool {
 			String[] prAndOutlinkArray = lineText.toString().split(PR_DELIMITER);
 
 			String pr = prAndOutlinkArray[0];
-			String outLinkSet = prAndOutlinkArray[1];
+			String outLinkSet = "";
 
-			if (outLinkSet.length() > OUTLINK_LIST_DELIMITER.length()) {
+			if (prAndOutlinkArray.length == 2) {
+				outLinkSet = prAndOutlinkArray[1];
+			}
+
+			if (outLinkSet.length() > 0) {
 				String[] outLinks = outLinkSet.split(OUTLINK_LIST_DELIMITER);
-				for (String outlink : outLinks) {
-					if (!outlink.isEmpty() && !pr.isEmpty())
-						context.write(new Text(outlink),
-								new Text(String.valueOf(Double.parseDouble(pr) / (double) outLinks.length)));
+				if (outLinks != null && outLinks.length > 0) {
+					for (String outlink : outLinks) {
+						if (!outlink.isEmpty() && !pr.isEmpty())
+							context.write(new Text(outlink),
+									new Text(String.valueOf(Double.parseDouble(pr) / (double) outLinks.length)));
+					}
 				}
 			}
 
@@ -355,7 +361,10 @@ public class PageRank extends Configured implements Tool {
 				String str = content.toString();
 				if (str.contains(PR_DELIMITER)) {
 					String[] linkGraphArray = str.split(PR_DELIMITER);
-					outlinkList = linkGraphArray[1];
+
+					if (linkGraphArray.length == 2)
+						outlinkList = linkGraphArray[1];
+
 					hasOriginalPRAndOutlinkList = true;
 				} else {
 					pRNew += Double.parseDouble(str);
@@ -375,7 +384,8 @@ public class PageRank extends Configured implements Tool {
 			String[] temp = lineText.toString().split(PR_DELIMITER);
 
 			// use rank as key and url as value to help sort
-			context.write(new DoubleWritable(Double.valueOf(temp[0])), url);
+			if (temp.length > 0)
+				context.write(new DoubleWritable(Double.valueOf(temp[0])), url);
 
 		}
 	}

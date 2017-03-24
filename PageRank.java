@@ -3,16 +3,12 @@ package com.asgn3;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.regex.Pattern;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.FileUtil;
-import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
@@ -20,7 +16,9 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.Logger;
@@ -33,10 +31,7 @@ public class PageRank extends Configured implements Tool {
 
 	public static final Logger LOG = Logger.getLogger(PageRank.class);
 	public static final String PR_DELIMITER = ",,,,,";
-	public static final String URL_SPLIT_DELIMITER = "url_split_delimiter";
 	public static final String OUTLINK_LIST_DELIMITER = "#####";
-
-	// public static String PAGE_COUNT_PATH;
 
 	public static void main(String[] args) throws Exception {
 		int res = ToolRunner.run(new PageRank(), args);
@@ -44,40 +39,82 @@ public class PageRank extends Configured implements Tool {
 	}
 
 	public int run(String[] args) throws Exception {
-		Job pageCountjob = Job.getInstance(getConf(), " pageCountjob ");
 
-		// Configuration configuration = pageCountjob.getConfiguration(); //
-		// create
-		// a
-		// configuration
-		// reference
+		Configuration conf1 = new Configuration();
 
-		// configuration.setInt("totalDocuments", (int) fileCount);
+		String intermediate_dir = "intermediate_dir";
+		Path output_path = new Path(args[1]);
+		Path intermediate_path = new Path(intermediate_dir);
+
+		FileSystem hdfs = FileSystem.get(conf1);
+
+		try {
+			if (hdfs.exists(output_path)) {
+				hdfs.delete(output_path, true);
+			}
+			if (hdfs.exists(intermediate_path)) {
+				hdfs.delete(intermediate_path, true);
+			}
+			hdfs.mkdirs(intermediate_path);
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		Path links_count = new Path(intermediate_path, "links_count");
+
+		Job pageCountjob = Job.getInstance(conf1, " pageCountjob ");
 
 		pageCountjob.setJarByClass(this.getClass());
 		pageCountjob.setMapperClass(MapPageCount.class);
 		pageCountjob.setReducerClass(ReducePageCount.class);
 
-		FileInputFormat.addInputPath(pageCountjob, new Path(args[0]));
-		FileOutputFormat.setOutputPath(pageCountjob, new Path(args[1]));
+		FileInputFormat.addInputPaths(pageCountjob, args[0]);
+		FileOutputFormat.setOutputPath(pageCountjob, links_count);
 
 		// Explicitly set key and value types of map and reduce output
 		pageCountjob.setOutputKeyClass(Text.class);
-		pageCountjob.setOutputValueClass(Text.class);
-		pageCountjob.setMapOutputKeyClass(Text.class);
-		pageCountjob.setMapOutputValueClass(IntWritable.class);
+		pageCountjob.setOutputValueClass(IntWritable.class);
 
+		/*
+		 * //this? pageCountjob.setMapOutputKeyClass(Text.class);
+		 * pageCountjob.setMapOutputValueClass(IntWritable.class);
+		 */
 		int success = pageCountjob.waitForCompletion(true) ? 0 : 1;
 
+		System.out.println("=====PAGE COUNT COMPLETE=====");
 		// PHASE-1
 		if (success == 0) {
 
-			// PAGE_COUNT_PATH = args[1];
-
 			Job linkGraphJob = Job.getInstance(getConf(), "linkGraphJob");
 
-			Configuration conf = linkGraphJob.getConfiguration();
-			conf.set("PAGE_COUNT_PATH", args[1]);
+			Configuration conf2 = linkGraphJob.getConfiguration();
+
+			Path link_graph = new Path(intermediate_path, "link_graph");
+
+			FileSystem fs2 = FileSystem.get(conf2);
+			Path p = new Path(links_count, "part-r-00000");
+
+			BufferedReader br = new BufferedReader(new InputStreamReader(fs2.open(p)));
+			String line;
+			int numOfLines = 1;
+			while ((line = br.readLine()) != null) {
+				if (line.trim().length() > 0) {
+					System.out.println(line);
+					String[] parts = line.split("\\s+");
+					numOfLines = Integer.parseInt(parts[1]);
+				}
+			}
+			br.close();
+
+			/*
+			 * String totalLineCount = readFile(args[1]);
+			 * System.out.println("line count is : " + totalLineCount); String[]
+			 * counts = totalLineCount.split("\t"); // check trim also
+			 * System.out.println("line count is : " + counts[1]);
+			 */
+
+			conf2.set("numOfLines", String.valueOf(numOfLines));
 
 			linkGraphJob.setJarByClass(this.getClass());
 
@@ -87,9 +124,9 @@ public class PageRank extends Configured implements Tool {
 
 			// job2.setInputFormatClass(KeyValueTextInputFormat.class);
 
-			FileInputFormat.addInputPath(linkGraphJob, new Path(args[0]));
+			FileInputFormat.addInputPaths(linkGraphJob, args[0]);
 
-			FileOutputFormat.setOutputPath(linkGraphJob, new Path(args[2]));
+			FileOutputFormat.setOutputPath(linkGraphJob, link_graph);
 
 			// Explicitly set key and value types of map and reduce output
 			linkGraphJob.setOutputKeyClass(Text.class);
@@ -98,17 +135,16 @@ public class PageRank extends Configured implements Tool {
 			linkGraphJob.setMapOutputValueClass(Text.class);
 
 			success = linkGraphJob.waitForCompletion(true) ? 0 : 1;
-		}
 
-		// PHASE-2
-		if (success == 0) {
+			// PHASE-2
+			if (success == 0) {
 
-			for (int i = 0; i < 10; i++) {
+				//for (int i = 1; i < 3; i++) {
 
+				System.out.println("=========================Iteration" + 1 + "=========================");
 				Job pageRankComputeJob = Job.getInstance(getConf(), "pageRankComputeJob");
 
-				Configuration conf = pageRankComputeJob.getConfiguration();
-				// conf.set("PAGE_COUNT_PATH", args[1]);
+				Configuration conf3 = pageRankComputeJob.getConfiguration();
 
 				pageRankComputeJob.setJarByClass(this.getClass());
 
@@ -116,37 +152,71 @@ public class PageRank extends Configured implements Tool {
 
 				pageRankComputeJob.setReducerClass(ReducePageRankCompute.class);
 
-				// job2.setInputFormatClass(KeyValueTextInputFormat.class);
+				// change here too
+				Path intermediate_file_path = new Path(intermediate_path, "iteration" + 1);
 
-				if (i == 0) {
-					FileInputFormat.addInputPath(pageRankComputeJob, new Path(args[2]));
-					FileOutputFormat.setOutputPath(pageRankComputeJob, new Path(args[3]));
-				} else {
-					FileSystem filesystem = FileSystem.get(conf);
-					String args3PathCopy = args[3] + "copy";
+				FileInputFormat.addInputPath(pageRankComputeJob, link_graph);
+				FileOutputFormat.setOutputPath(pageRankComputeJob, intermediate_file_path);
 
-					// check if copy exists in filesystem before creating it
-					if (filesystem.exists(new Path(args3PathCopy)))
-						filesystem.delete(new Path(args3PathCopy), true);
-
-					// create a copy of the output folder: args[3], delete old
-					// copy and use the new copy as input.
-					FileUtil.copy(filesystem, new Path(args[3]), filesystem, new Path(args3PathCopy), false, conf);
-					filesystem.delete(new Path(args[3]), true);
-
-					FileInputFormat.addInputPath(pageRankComputeJob, new Path(args3PathCopy));
-					FileOutputFormat.setOutputPath(pageRankComputeJob, new Path(args[3]));
+				// LOGGING
+				FileSystem fs3 = FileSystem.get(conf3);
+				Path p3 = new Path(link_graph, "part-r-00000");
+				BufferedReader br3 = new BufferedReader(new InputStreamReader(fs3.open(p3)));
+				String line1;
+				while ((line1 = br3.readLine()) != null) {
+					System.out.println(line1);
 				}
-				// Explicitly set key and value types of map and reduce output
+				br.close();
+
+				pageRankComputeJob.setInputFormatClass(KeyValueTextInputFormat.class);
+				pageRankComputeJob.setOutputFormatClass(TextOutputFormat.class);
+
+				/*
+				 * if (i == 0) {
+				 * FileInputFormat.addInputPath(pageRankComputeJob, new
+				 * Path(args[2]));
+				 * FileOutputFormat.setOutputPath(pageRankComputeJob, new
+				 * Path(args[3])); } else { FileSystem filesystem =
+				 * FileSystem.get(conf); String args3PathCopy = args[3] +
+				 * "copy";
+				 * 
+				 * // check if copy exists in filesystem before creating it if
+				 * (filesystem.exists(new Path(args3PathCopy)))
+				 * filesystem.delete(new Path(args3PathCopy), true);
+				 * 
+				 * deleteDirectories(args3PathCopy);
+				 * 
+				 * // create a copy of the output folder: args[3], delete old //
+				 * copy and use the new copy as input. FileUtil.copy(filesystem,
+				 * new Path(args[3]), filesystem, new Path(args3PathCopy),
+				 * false, conf); filesystem.delete(new Path(args[3]), true);
+				 * 
+				 * if(filesystem.exists(new Path(args[3])))
+				 * filesystem.rename(new Path(args[3]), new
+				 * Path(args3PathCopy)); //copyFilesToAnotherDirectory(args[3],
+				 * args3PathCopy); //deleteDirectories(args[3]);
+				 */
+				// FileInputFormat.addInputPath(pageRankComputeJob, new
+				// Path(args3PathCopy));
+				// FileOutputFormat.setOutputPath(pageRankComputeJob, new
+				// Path(args[3]));
+				// }
+
+				// Explicitly set key and value types of map and reduce
+				// output
 				pageRankComputeJob.setOutputKeyClass(Text.class);
 				pageRankComputeJob.setOutputValueClass(Text.class);
-				pageRankComputeJob.setMapOutputKeyClass(Text.class);
-				pageRankComputeJob.setMapOutputValueClass(Text.class);
+
+				// pageRankComputeJob.setMapOutputKeyClass(Text.class);
+				// pageRankComputeJob.setMapOutputValueClass(Text.class);
 
 				success = pageRankComputeJob.waitForCompletion(true) ? 0 : 1;
-			}
-		}
 
+				link_graph = intermediate_file_path;
+			}
+			// hdfs.delete(intermediate_path, true);
+		}
+		// }
 		return success;
 	}
 
@@ -163,7 +233,7 @@ public class PageRank extends Configured implements Tool {
 		}
 	}
 
-	public static class ReducePageCount extends Reducer<Text, IntWritable, Text, Text> {
+	public static class ReducePageCount extends Reducer<Text, IntWritable, Text, IntWritable> {
 		@Override
 		public void reduce(Text word, Iterable<IntWritable> counts, Context context)
 				throws IOException, InterruptedException {
@@ -171,7 +241,7 @@ public class PageRank extends Configured implements Tool {
 			for (IntWritable count : counts) {
 				sum += count.get(); // sums up word occurrences
 			}
-			context.write(new Text(word), new Text(String.valueOf(sum)));
+			context.write(new Text("numOfLines"), new IntWritable(sum));
 		}
 	}
 
@@ -179,25 +249,10 @@ public class PageRank extends Configured implements Tool {
 
 		public void map(LongWritable offset, Text lineText, Context context) throws IOException, InterruptedException {
 
-			double PRinit = 0;
-			String line = lineText.toString().trim(); // todo : do i need trim?
+			String lineCount = context.getConfiguration().get("numOfLines");
+			double PRinit = 1 / Double.parseDouble(lineCount);
+			String line = lineText.toString().trim();
 			String mainURL = "";
-
-			// Read pageCount
-			FileSystem fs = FileSystem.get(context.getConfiguration());
-			Path path = null;
-			RemoteIterator<LocatedFileStatus> fileStatusListIterator = fs
-					.listFiles(new Path(context.getConfiguration().get("PAGE_COUNT_PATH")), true);
-			while (fileStatusListIterator.hasNext()) {
-				LocatedFileStatus fileStatus = fileStatusListIterator.next();
-				path = new Path(fileStatus.getPath().toString());
-			}
-			BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(path)));
-			String pageCount;
-			pageCount = br.readLine().trim();
-			if (pageCount != null) {
-				PRinit = 1 / Integer.parseInt(pageCount);
-			}
 
 			// get page title from line
 			Pattern pattern0 = Pattern.compile("<title>(.*?)</title>");
@@ -230,29 +285,32 @@ public class PageRank extends Configured implements Tool {
 		public void reduce(Text url, Iterable<Text> prAndOutlinkList, Context context)
 				throws IOException, InterruptedException {
 			for (Text text : prAndOutlinkList) {
-				context.write(new Text(url.toString() + URL_SPLIT_DELIMITER), text);
+				context.write(url, text);
 			}
 		}
 	}
 
-	public static class MapPageRankCompute extends Mapper<LongWritable, Text, Text, Text> {
+	public static class MapPageRankCompute extends Mapper<Text, Text, Text, Text> {
 
-		public void map(LongWritable offset, Text lineText, Context context) throws IOException, InterruptedException {
-			String[] urlPRAndOutlinkList = lineText.toString().split(URL_SPLIT_DELIMITER);
-			String url = urlPRAndOutlinkList[0];
-			String prAndOutlinkList = urlPRAndOutlinkList[1].trim();
+		public void map(Text offset, Text lineText, Context context) throws IOException, InterruptedException {
 
-			String[] prAndOutlinkArray = prAndOutlinkList.split(PR_DELIMITER);
+			String[] prAndOutlinkArray = lineText.toString().split(PR_DELIMITER);
+
 			String pr = prAndOutlinkArray[0];
 			String outLinkSet = prAndOutlinkArray[1];
 
-			String[] outLinks = outLinkSet.split(OUTLINK_LIST_DELIMITER);
-
-			for (String outlink : outLinks) {
-				if (!outlink.isEmpty())
-					context.write(new Text(url), new Text(String.valueOf(Double.valueOf(pr) / outLinks.length)));
+			if (outLinkSet.length() > OUTLINK_LIST_DELIMITER.length()) {
+				String[] outLinks = outLinkSet.split(OUTLINK_LIST_DELIMITER);
+				for (String outlink : outLinks) {
+					if (!outlink.isEmpty() && !pr.isEmpty())
+						context.write(new Text(outlink),
+								new Text(String.valueOf(Double.parseDouble(pr) / (double) outLinks.length)));
+				}
 			}
-			context.write(new Text(url), new Text(prAndOutlinkList));
+
+			if (!offset.toString().isEmpty() && !lineText.toString().isEmpty())
+				context.write(offset, lineText);
+
 		}
 	}
 
@@ -261,31 +319,25 @@ public class PageRank extends Configured implements Tool {
 		public void reduce(Text url, Iterable<Text> iterable, Context context)
 				throws IOException, InterruptedException {
 
-			ArrayList<Text> iterableCopy = new ArrayList<>();
-			String prAndOutlinkList = "";
+			boolean hasOriginalPRAndOutlinkList = false;
 			String outlinkList = "";
-			double pRNew = 0;
+			double pRNew = 0.0;
 			for (Text content : iterable) {
-				iterableCopy.add(content);
-			}
-
-			for (int i = 0; i < iterableCopy.size(); i++) {
 				// check if value is prAndURlist
-				String str = iterableCopy.get(i).toString();
-				if (str.contains(PR_DELIMITER))
-					prAndOutlinkList = str; // should happen only once
-				else
-					pRNew += Double.valueOf(str);
-			}
-
-			if (!prAndOutlinkList.isEmpty()) {
-				String[] linkGraphArray = prAndOutlinkList.split(PR_DELIMITER);
-				outlinkList = linkGraphArray[1];
+				String str = content.toString();
+				if (str.contains(PR_DELIMITER)) {
+					String[] linkGraphArray = str.split(PR_DELIMITER);
+					outlinkList = linkGraphArray[1];
+					hasOriginalPRAndOutlinkList = true;
+				} else {
+					pRNew += Double.parseDouble(str);
+				}
 			}
 
 			double pRNewDamped = (1 - 0.85) + 0.85 * pRNew;
 
-			context.write(url, new Text(String.valueOf(pRNewDamped) + PR_DELIMITER + outlinkList));
+			if (!url.toString().isEmpty() && hasOriginalPRAndOutlinkList)
+				context.write(url, new Text(String.valueOf(pRNewDamped) + PR_DELIMITER + outlinkList));
 		}
 	}
 }

@@ -304,7 +304,28 @@ Read, parse and store the page count written by the previous job to be used late
 
 				//record sorting job completion status
 				success = pageRankSortJob.waitForCompletion(true) ? 0 : 1;
+				
+				if(success==0){
+					Path old_intermediate_file_path_10 = new Path(intermediate_path, "iter10");
 
+					//check for existing intermediate and output dirs and delete them automatically.
+					try {
+						if (fs4.exists(old_intermediate_file_path_10)) {
+							fs4.delete(old_intermediate_file_path_10, true);
+						}
+						if (fs4.exists(link_graph)) {
+							fs4.delete(link_graph, true);
+						}
+						if (fs4.exists(page_count)) {
+							fs4.delete(page_count, true);
+						}
+
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+
+				}
+		
 			}
 
 		}

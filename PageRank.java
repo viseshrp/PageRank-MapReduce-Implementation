@@ -193,6 +193,7 @@ Read, parse and store the page count written by the previous job to be used late
 					//instantiate third pageRankComputeJob
 					Job pageRankComputeJob = Job.getInstance(getConf(), "pageRankComputeJob");
 
+					Configuration conf4 = pageRankComputeJob.getConfiguration();
 					//set jar, mappers and reducers
 					pageRankComputeJob.setJarByClass(this.getClass());
 					pageRankComputeJob.setMapperClass(MapPageRankCompute.class);
@@ -204,6 +205,9 @@ Read, parse and store the page count written by the previous job to be used late
 					Example: /user/myname/intermediate_dir/iter1 for the first iteration
 					*/
 					Path intermediate_file_path = new Path(intermediate_path, "iter" + i);
+					
+					Path old_intermediate_file_path = new Path(intermediate_path, "iter" + String.valueOf(i - 2));
+
 
 					//set input path which is the output of the linkGraphJob, containing all link graphs needed
 					//to compute page rank.
@@ -211,6 +215,17 @@ Read, parse and store the page count written by the previous job to be used late
 
 					//set output path which is an intermediate directory : intermediate_file_path defined above
 					FileOutputFormat.setOutputPath(pageRankComputeJob, intermediate_file_path);
+
+					FileSystem fs4 = FileSystem.get(conf4); //instantiate filesystem from current config object
+
+					//check for existing intermediate and output dirs and delete them automatically.
+					try {
+						if (fs4.exists(old_intermediate_file_path)) {
+							fs4.delete(old_intermediate_file_path, true);
+						}
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
 
 					//set format classes, basically to use the "URL" or page title as an offset instead of an actual offset
 					//which is a wasted variable and is never used.
@@ -241,6 +256,8 @@ Read, parse and store the page count written by the previous job to be used late
 				//instantiate fourth pageRankSortJob
 				Job pageRankSortJob = Job.getInstance(getConf(), "pageRankSortJob");
 
+				Configuration conf5 = pageRankSortJob.getConfiguration();
+
 				//set jar, mappers, reducers
 				pageRankSortJob.setJarByClass(this.getClass());
 				pageRankSortJob.setMapperClass(MapPageRankSort.class);
@@ -257,6 +274,19 @@ Read, parse and store the page count written by the previous job to be used late
 
 				//restrict reducers to one, which is the only way to get sorting done right.
 				pageRankSortJob.setNumReduceTasks(1);
+
+				Path old_intermediate_file_path = new Path(intermediate_path, "iter9");
+
+				FileSystem fs4 = FileSystem.get(conf5); //instantiate filesystem from current config object
+
+				//check for existing intermediate and output dirs and delete them automatically.
+				try {
+					if (fs4.exists(old_intermediate_file_path)) {
+						fs4.delete(old_intermediate_file_path, true);
+					}
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
 
 				//set format classes, basically to use the "URL" or page title as an offset instead of an actual offset
 				//which is a wasted variable and is never used.
